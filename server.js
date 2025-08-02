@@ -7,22 +7,20 @@ const path = require("path");
 const app = express();
 const port = 3000;
 
-// IMPORTANT: Update these origins to your actual client URLs
 const allowedOrigins = [
   "https://travdif.com",
   "https://www.travdif.com",
-  "https://incomparable-heliotrope-f687a0.netlify.app", // Your Netlify frontend
-  "http://localhost:3000"
+  "https://incomparable-heliotrope-f687a0.netlify.app", // Netlify frontend URL
+  "http://localhost:3000"                               // local testing
 ];
 
-// Configure CORS to allow requests from allowed origins
+// CORS configuration to allow only specified origins
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin like curl or Postman
+    // Allow requests with no origin (like Postman or curl)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
-      return callback(new Error(msg), false);
+      return callback(new Error('CORS policy does not allow access from this origin'), false);
     }
     return callback(null, true);
   },
@@ -30,39 +28,39 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Enable preflight requests for all routes
+// Handle preflight OPTIONS requests
 app.options("*", cors());
 
 app.use(express.json());
 
-// Load TravDif knowledge base (ensure this file is in the same directory)
+// Load TravDif knowledge text file
 const knowledgePath = path.join(__dirname, "travdif_knowledge.txt");
 const travdifKnowledge = fs.readFileSync(knowledgePath, "utf-8");
 
-// Initialize OpenAI client with the API key from environment variable
+// Initialize OpenAI client with API key from environment variable
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 app.post("/chat", async (req, res) => {
   const messages = req.body.messages;
-
+  
   if (!Array.isArray(messages)) {
     return res.status(400).json({ reply: "Invalid request format. 'messages' must be an array." });
   }
 
   try {
-    // Replace system prompt in the first message if present
+    // Replace or insert system prompt in the first message
     const updatedMessages = messages.map((msg, idx) => {
       if (idx === 0 && msg.role === "system") {
         return {
           role: "system",
           content: `
 You are Zivy, the AI assistant for TravDif.
-Answer all questions concisely and clearly, with a friendly but professional tone.
-Be warm and human, but avoid lengthy replies or unnecessary details.
-Mirror the user's mood: act chill and casual if they are, businesslike if they're serious.
-For store/product/support questions, always use TravDif's knowledge; for other topics, use your general world knowledge.
+Answer concisely and clearly, in a friendly but professional tone.
+Be warm and human, avoid unnecessary length.
+Adapt your tone to the user’s mood: casual if they are casual, formal if they are formal.
+Use the TravDif knowledge below for store/product/support questions; use general knowledge for other topics.
 
 ${travdifKnowledge}
           `.trim()
@@ -71,7 +69,6 @@ ${travdifKnowledge}
       return msg;
     });
 
-    // Call OpenAI API with the full chat history
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: updatedMessages
