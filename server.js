@@ -7,23 +7,9 @@ const path = require("path");
 const app = express();
 const port = 3000;
 
-const allowedOrigins = [
-  "https://travdif.com",
-  "https://www.travdif.com",
-  "https://incomparable-heliotrope-f687a0.netlify.app", // Netlify frontend URL
-
-];
-
-// CORS configuration to allow only specified origins
+// Allow all websites to use Zivybot
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like Postman or curl)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('CORS policy does not allow access from this origin'), false);
-    }
-    return callback(null, true);
-  },
+  origin: true, // Allow any website
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
