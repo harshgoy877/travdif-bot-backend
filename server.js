@@ -47,6 +47,18 @@ app.post("/chat", async (req, res) => {
   
   if (!Array.isArray(messages)) {
     return res.status(400).json({ reply: "Invalid request format. 'messages' must be an array." });
+// Save chat record
+const chatRecord = {
+  timestamp: new Date().toISOString(),
+  clientId: req.body.clientId || "default_client",
+  userMessage: messages.slice(-1)[0].content,
+  botReply: reply
+};
+const chatFile = path.join(__dirname, "chats.json");
+const existing = JSON.parse(fs.readFileSync(chatFile, "utf-8"));
+existing.push(chatRecord);
+fs.writeFileSync(chatFile, JSON.stringify(existing, null, 2));
+
   }
 
   try {
