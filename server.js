@@ -11,7 +11,7 @@ const allowedOrigins = [
   "https://travdif.com",
   "https://www.travdif.com",
   "https://incomparable-heliotrope-f687a0.netlify.app", // Netlify frontend URL
-  "http://localhost:3000"                               // local testing
+
 ];
 
 // CORS configuration to allow only specified origins
