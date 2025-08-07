@@ -1,8 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const { OpenAI } = require("openai");
-const fs = require("fs");
-const path = require("path");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -35,59 +33,31 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// CONFIGURATION - SET THESE AFTER MANUAL UPLOAD
+const CONFIG = {
+  // OPTION 1: If you uploaded to Vector Stores (RECOMMENDED)
+  VECTOR_STORE_ID: process.env.VECTOR_STORE_ID || "vs_6894cc76c64c8191927465f758ecf7c6",
+  
+  // OPTION 2: If you uploaded to Files (ALTERNATIVE)  
+  FILE_ID: process.env.FILE_ID || "file_your_file_id_here",
+  
+  // Choose your method: "vector_store" or "file"
+  METHOD: process.env.UPLOAD_METHOD || "vector_store" // Change to "file" if using files
+};
+
 // Global variables
 let assistant = null;
 const userThreads = new Map();
 let totalRequests = 0;
 let totalCost = 0;
 
-// Initialize Assistant with knowledge base
+// Initialize Assistant with manually uploaded knowledge
 async function initializeAssistant() {
   try {
-    console.log("🔄 Starting Assistant initialization...");
+    console.log("🔄 Initializing Assistant with manually uploaded knowledge base...");
+    console.log("📋 Method:", CONFIG.METHOD);
     
-    const knowledgePath = path.join(__dirname, "travdif_knowledge.txt");
-    
-    if (!fs.existsSync(knowledgePath)) {
-      console.error("❌ Knowledge base file not found:", knowledgePath);
-      throw new Error("travdif_knowledge.txt not found");
-    }
-
-    console.log("📤 Uploading knowledge base to OpenAI...");
-    
-    // Upload file
-    const file = await openai.files.create({
-      file: fs.createReadStream(knowledgePath),
-      purpose: "assistants"
-    });
-
-    console.log("✅ File uploaded successfully. ID:", file.id);
-
-    // Create vector store
-    const vectorStore = await openai.beta.vectorStores.create({
-      name: "Travdif Knowledge Base",
-      file_ids: [file.id]
-    });
-
-    console.log("✅ Vector store created. ID:", vectorStore.id);
-
-    // Wait for file processing
-    console.log("⏳ Waiting for file processing...");
-    let fileStatus = await openai.beta.vectorStores.files.retrieve(vectorStore.id, file.id);
-    let attempts = 0;
-    
-    while (fileStatus.status === 'in_progress' && attempts < 30) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      fileStatus = await openai.beta.vectorStores.files.retrieve(vectorStore.id, file.id);
-      attempts++;
-    }
-
-    if (fileStatus.status !== 'completed') {
-      console.log("⚠️ File processing status:", fileStatus.status);
-    }
-
-    // Create assistant
-    assistant = await openai.beta.assistants.create({
+    let assistantConfig = {
       name: "Zivy - Travdif AI Assistant",
       instructions: `You are Zivy, an advanced AI assistant for Travdif.
 
@@ -109,22 +79,47 @@ FORMATTING RULES:
 
 Answer user questions about Travdif travel services accurately and engagingly using the knowledge base.`,
       model: "gpt-4o",
-      tools: [{ type: "file_search" }],
-      tool_resources: {
+      tools: [{ type: "file_search" }]
+    };
+
+    // Configure based on upload method
+    if (CONFIG.METHOD === "vector_store") {
+      console.log("🗂️ Using Vector Store ID:", CONFIG.VECTOR_STORE_ID);
+      assistantConfig.tool_resources = {
         file_search: {
-          vector_store_ids: [vectorStore.id]
+          vector_store_ids: [CONFIG.VECTOR_STORE_ID]
         }
-      }
-    });
+      };
+    } else if (CONFIG.METHOD === "file") {
+      console.log("📄 Using File ID:", CONFIG.FILE_ID);
+      assistantConfig.tool_resources = {
+        file_search: {
+          vector_stores: [{
+            file_ids: [CONFIG.FILE_ID]
+          }]
+        }
+      };
+    }
+
+    // Create assistant
+    assistant = await openai.beta.assistants.create(assistantConfig);
 
     console.log("✅ Assistant created successfully! ID:", assistant.id);
-    console.log("🚀 Zivy backend is ready!");
+    console.log("🚀 Zivy backend ready with manually uploaded knowledge base!");
     
     return assistant;
 
   } catch (error) {
     console.error("❌ Assistant initialization failed:", error.message);
-    console.error("Stack trace:", error.stack);
+    
+    // Helpful error messages
+    if (error.message.includes("vector_store")) {
+      console.error("💡 Check your VECTOR_STORE_ID in environment variables or CONFIG");
+    }
+    if (error.message.includes("file")) {
+      console.error("💡 Check your FILE_ID in environment variables or CONFIG");
+    }
+    
     throw error;
   }
 }
@@ -157,7 +152,7 @@ app.post("/chat", async (req, res) => {
     }
 
     const userQuery = userMessage.content;
-    console.log(`📝 Processing query: "${userQuery.substring(0, 50)}..."`);
+    console.log(`📝 Processing: "${userQuery.substring(0, 50)}..."`);
 
     if (!assistant) {
       console.log("⚠️ Assistant not ready, initializing...");
@@ -205,6 +200,9 @@ app.post("/chat", async (req, res) => {
 
     if (runStatus.status !== 'completed') {
       console.log("⚠️ Run status:", runStatus.status);
+      if (runStatus.status === 'failed') {
+        console.log("❌ Run failed:", runStatus.last_error);
+      }
       return res.json({ 
         reply: "I'm processing your request. Please try again in a moment! 🔧" 
       });
@@ -220,7 +218,7 @@ app.post("/chat", async (req, res) => {
 
     const reply = assistantMessage.content[0].text.value;
 
-    // Estimate cost
+    // Estimate cost (GPT-4o pricing)
     const estimatedInputTokens = userQuery.length / 4;
     const estimatedOutputTokens = reply.length / 4;
     const estimatedCost = (estimatedInputTokens * 5.0 + estimatedOutputTokens * 15.0) / 1000000;
@@ -243,7 +241,11 @@ app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
     assistant_ready: !!assistant,
-    mode: "assistant_api_only",
+    config: {
+      method: CONFIG.METHOD,
+      vector_store_id: CONFIG.METHOD === "vector_store" ? CONFIG.VECTOR_STORE_ID : "N/A",
+      file_id: CONFIG.METHOD === "file" ? CONFIG.FILE_ID : "N/A"
+    },
     stats: {
       total_requests: totalRequests,
       estimated_total_cost: `$${totalCost.toFixed(4)}`,
@@ -255,7 +257,11 @@ app.get("/health", (req, res) => {
 // Stats endpoint
 app.get("/stats", (req, res) => {
   res.json({
-    mode: "Assistant API (No Caching)",
+    mode: "Manual Upload + Assistant API",
+    configuration: {
+      upload_method: CONFIG.METHOD,
+      knowledge_base: CONFIG.METHOD === "vector_store" ? CONFIG.VECTOR_STORE_ID : CONFIG.FILE_ID
+    },
     performance: {
       total_requests: totalRequests,
       assistant_calls: totalRequests,
@@ -270,37 +276,36 @@ app.get("/stats", (req, res) => {
   });
 });
 
-// Reload knowledge endpoint
-app.post("/admin/reload-knowledge", async (req, res) => {
-  try {
-    console.log("🔄 Reloading knowledge base...");
-    await initializeAssistant();
-    res.json({ 
-      status: "success", 
-      message: "Knowledge base reloaded successfully" 
-    });
-  } catch (error) {
-    console.error("❌ Reload failed:", error.message);
-    res.status(500).json({ 
-      status: "error", 
-      message: "Failed to reload knowledge base" 
-    });
-  }
+// Configuration endpoint (for debugging)
+app.get("/config", (req, res) => {
+  res.json({
+    method: CONFIG.METHOD,
+    vector_store_configured: CONFIG.VECTOR_STORE_ID !== "vs_your_vector_store_id_here",
+    file_configured: CONFIG.FILE_ID !== "file_your_file_id_here",
+    assistant_ready: !!assistant,
+    environment_variables: {
+      openai_api_key: !!process.env.OPENAI_API_KEY,
+      vector_store_id: !!process.env.VECTOR_STORE_ID,
+      file_id: !!process.env.FILE_ID,
+      upload_method: !!process.env.UPLOAD_METHOD
+    }
+  });
 });
 
 // Root endpoint
 app.get("/", (req, res) => {
   res.json({
-    message: "Zivy Backend is running!",
+    message: "Zivy Backend with Manual Upload Setup",
     status: "healthy",
-    assistant_ready: !!assistant
+    assistant_ready: !!assistant,
+    instructions: "Configure VECTOR_STORE_ID or FILE_ID in environment variables"
   });
 });
 
 // Start server
 async function startServer() {
   try {
-    console.log("🚀 Starting Zivy backend...");
+    console.log("🚀 Starting Zivy backend with manual upload setup...");
     
     // Check environment variables
     if (!process.env.OPENAI_API_KEY) {
@@ -309,16 +314,27 @@ async function startServer() {
     
     console.log("✅ OpenAI API key found");
     
+    // Validate configuration
+    if (CONFIG.METHOD === "vector_store" && CONFIG.VECTOR_STORE_ID === "vs_your_vector_store_id_here") {
+      console.log("⚠️ VECTOR_STORE_ID not configured - please set it in environment variables");
+    }
+    
+    if (CONFIG.METHOD === "file" && CONFIG.FILE_ID === "file_your_file_id_here") {
+      console.log("⚠️ FILE_ID not configured - please set it in environment variables");
+    }
+    
     // Start server first
     app.listen(port, () => {
       console.log(`✅ Server running on port ${port}`);
       console.log(`📊 Health: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/health`);
       console.log(`📈 Stats: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/stats`);
+      console.log(`⚙️ Config: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/config`);
     });
     
     // Initialize assistant in background
     initializeAssistant().catch(error => {
-      console.error("⚠️ Assistant initialization failed, but server is running:", error.message);
+      console.error("⚠️ Assistant initialization failed:", error.message);
+      console.log("💡 Server is running, but you need to configure Vector Store ID or File ID");
     });
     
   } catch (error) {
@@ -338,12 +354,11 @@ process.on('SIGTERM', () => {
 
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error.message);
-  console.error(error.stack);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('❌ Unhandled Rejection:', reason);
   process.exit(1);
 });
 

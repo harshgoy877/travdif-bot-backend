@@ -1,7 +1,7 @@
 {
   "name": "travdif-bot-backend",
   "version": "2.0.0",
-  "description": "Cost-optimized Zivy AI chatbot backend with OpenAI Assistant API",
+  "description": "Zivy AI chatbot backend with manual knowledge base upload",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -21,7 +21,7 @@
     "openai",
     "assistant-api",
     "travdif",
-    "cost-optimization"
+    "manual-upload"
   ],
   "author": "Travdif",
   "license": "ISC"
