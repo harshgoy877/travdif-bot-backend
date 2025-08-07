@@ -1,7 +1,7 @@
 {
   "name": "travdif-bot-backend",
-  "version": "2.0.0",
-  "description": "Zivy AI chatbot backend with manual knowledge base upload",
+  "version": "2.0.0", 
+  "description": "Zivy AI chatbot backend using OpenAI File Storage",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5",
+    "cors": "^2.8.5", 
     "openai": "^4.28.0"
   },
   "engines": {
@@ -18,10 +18,10 @@
   },
   "keywords": [
     "chatbot",
-    "openai",
+    "openai", 
+    "file-storage",
     "assistant-api",
-    "travdif",
-    "manual-upload"
+    "travdif"
   ],
   "author": "Travdif",
   "license": "ISC"

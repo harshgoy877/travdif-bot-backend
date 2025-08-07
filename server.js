@@ -33,16 +33,11 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// CONFIGURATION - SET THESE AFTER MANUAL UPLOAD
+// CONFIGURATION - YOUR UPLOADED FILE ID
 const CONFIG = {
-  // OPTION 1: If you uploaded to Vector Stores (RECOMMENDED)
-  VECTOR_STORE_ID: process.env.VECTOR_STORE_ID || "vs_6894cc76c64c8191927465f758ecf7c6",
-  
-  // OPTION 2: If you uploaded to Files (ALTERNATIVE)  
-  FILE_ID: process.env.FILE_ID || "file_your_file_id_here",
-  
-  // Choose your method: "vector_store" or "file"
-  METHOD: process.env.UPLOAD_METHOD || "vector_store" // Change to "file" if using files
+  // Your uploaded file ID from OpenAI Storage
+  FILE_ID: process.env.FILE_ID || "file-36BWZph37fnT8u7x8Nb52o",
+  METHOD: "file"
 };
 
 // Global variables
@@ -51,13 +46,14 @@ const userThreads = new Map();
 let totalRequests = 0;
 let totalCost = 0;
 
-// Initialize Assistant with manually uploaded knowledge
+// Initialize Assistant with your uploaded file
 async function initializeAssistant() {
   try {
-    console.log("🔄 Initializing Assistant with manually uploaded knowledge base...");
-    console.log("📋 Method:", CONFIG.METHOD);
+    console.log("🔄 Initializing Assistant with uploaded file...");
+    console.log("📄 Using File ID:", CONFIG.FILE_ID);
     
-    let assistantConfig = {
+    // Create assistant with file search using your uploaded file
+    assistant = await openai.beta.assistants.create({
       name: "Zivy - Travdif AI Assistant",
       instructions: `You are Zivy, an advanced AI assistant for Travdif.
 
@@ -77,54 +73,37 @@ FORMATTING RULES:
 - Break long text into digestible chunks
 - Include relevant emojis for visual appeal
 
-Answer user questions about Travdif travel services accurately and engagingly using the knowledge base.`,
+Answer user questions about Travdif travel services accurately and engagingly using the knowledge base file.`,
       model: "gpt-4o",
-      tools: [{ type: "file_search" }]
-    };
-
-    // Configure based on upload method
-    if (CONFIG.METHOD === "vector_store") {
-      console.log("🗂️ Using Vector Store ID:", CONFIG.VECTOR_STORE_ID);
-      assistantConfig.tool_resources = {
-        file_search: {
-          vector_store_ids: [CONFIG.VECTOR_STORE_ID]
-        }
-      };
-    } else if (CONFIG.METHOD === "file") {
-      console.log("📄 Using File ID:", CONFIG.FILE_ID);
-      assistantConfig.tool_resources = {
+      tools: [{ type: "file_search" }],
+      tool_resources: {
         file_search: {
           vector_stores: [{
             file_ids: [CONFIG.FILE_ID]
           }]
         }
-      };
-    }
-
-    // Create assistant
-    assistant = await openai.beta.assistants.create(assistantConfig);
+      }
+    });
 
     console.log("✅ Assistant created successfully! ID:", assistant.id);
-    console.log("🚀 Zivy backend ready with manually uploaded knowledge base!");
+    console.log("📄 Connected to file:", CONFIG.FILE_ID);
+    console.log("🚀 Zivy backend ready with file-based knowledge base!");
     
     return assistant;
 
   } catch (error) {
     console.error("❌ Assistant initialization failed:", error.message);
     
-    // Helpful error messages
-    if (error.message.includes("vector_store")) {
-      console.error("💡 Check your VECTOR_STORE_ID in environment variables or CONFIG");
-    }
     if (error.message.includes("file")) {
-      console.error("💡 Check your FILE_ID in environment variables or CONFIG");
+      console.error("💡 Make sure your FILE_ID is correct:", CONFIG.FILE_ID);
+      console.error("💡 Check that the file exists in OpenAI Storage");
     }
     
     throw error;
   }
 }
 
-// Generate session ID
+// Generate session ID for thread management
 function generateSessionId(req) {
   const ip = req.ip || req.connection.remoteAddress || 'unknown';
   const userAgent = req.headers['user-agent'] || 'unknown';
@@ -159,7 +138,7 @@ app.post("/chat", async (req, res) => {
       await initializeAssistant();
     }
     
-    // Get or create thread
+    // Get or create thread for this user
     const sessionId = generateSessionId(req);
     let thread;
     
@@ -169,28 +148,28 @@ app.post("/chat", async (req, res) => {
       thread = await openai.beta.threads.create();
       userThreads.set(sessionId, thread.id);
       
-      // Cleanup old threads
+      // Cleanup old threads (keep memory usage reasonable)
       if (userThreads.size > 1000) {
         const firstKey = userThreads.keys().next().value;
         userThreads.delete(firstKey);
       }
     }
 
-    // Add message to thread
+    // Add user message to thread
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
       content: userQuery
     });
 
-    // Run assistant
+    // Run assistant with file search
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: assistant.id
     });
 
-    // Wait for completion
+    // Wait for completion with timeout
     let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
     let attempts = 0;
-    const maxAttempts = 30;
+    const maxAttempts = 30; // 30 seconds timeout
     
     while (runStatus.status === 'running' && attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -208,7 +187,7 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    // Get response
+    // Get the assistant's response
     const messagesResponse = await openai.beta.threads.messages.list(thread.id);
     const assistantMessage = messagesResponse.data[0];
     
@@ -218,7 +197,7 @@ app.post("/chat", async (req, res) => {
 
     const reply = assistantMessage.content[0].text.value;
 
-    // Estimate cost (GPT-4o pricing)
+    // Estimate cost (GPT-4o pricing: $5 input, $15 output per 1M tokens)
     const estimatedInputTokens = userQuery.length / 4;
     const estimatedOutputTokens = reply.length / 4;
     const estimatedCost = (estimatedInputTokens * 5.0 + estimatedOutputTokens * 15.0) / 1000000;
@@ -236,15 +215,15 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-// Health check
+// Health check endpoint
 app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
     assistant_ready: !!assistant,
-    config: {
-      method: CONFIG.METHOD,
-      vector_store_id: CONFIG.METHOD === "vector_store" ? CONFIG.VECTOR_STORE_ID : "N/A",
-      file_id: CONFIG.METHOD === "file" ? CONFIG.FILE_ID : "N/A"
+    method: "file_storage",
+    configuration: {
+      file_id: CONFIG.FILE_ID,
+      file_configured: CONFIG.FILE_ID !== "file_your_file_id_here"
     },
     stats: {
       total_requests: totalRequests,
@@ -254,13 +233,14 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Stats endpoint
+// Performance stats endpoint
 app.get("/stats", (req, res) => {
   res.json({
-    mode: "Manual Upload + Assistant API",
+    mode: "File Storage + Assistant API",
     configuration: {
-      upload_method: CONFIG.METHOD,
-      knowledge_base: CONFIG.METHOD === "vector_store" ? CONFIG.VECTOR_STORE_ID : CONFIG.FILE_ID
+      method: "file",
+      file_id: CONFIG.FILE_ID,
+      model: "gpt-4o"
     },
     performance: {
       total_requests: totalRequests,
@@ -270,60 +250,65 @@ app.get("/stats", (req, res) => {
     cost_analysis: {
       estimated_total_cost: `$${totalCost.toFixed(4)}`,
       avg_cost_per_request: totalRequests > 0 ? `$${(totalCost / totalRequests).toFixed(6)}` : "$0.000000",
-      monthly_projection_1000_req: `$${(totalCost / Math.max(totalRequests, 1) * 1000).toFixed(2)}`
+      monthly_projection_1000_req: `$${(totalCost / Math.max(totalRequests, 1) * 1000).toFixed(2)}`,
+      knowledge_storage_cost: "FREE (under 1GB)"
     },
-    active_threads: userThreads.size
+    active_threads: userThreads.size,
+    benefits: [
+      "Knowledge file stored in OpenAI (no input token charges)",
+      "File search automatically finds relevant content",
+      "Using GPT-4o model as requested",
+      "Major cost savings vs sending full knowledge base each time"
+    ]
   });
 });
 
-// Configuration endpoint (for debugging)
+// Configuration debug endpoint
 app.get("/config", (req, res) => {
   res.json({
     method: CONFIG.METHOD,
-    vector_store_configured: CONFIG.VECTOR_STORE_ID !== "vs_your_vector_store_id_here",
+    file_id: CONFIG.FILE_ID,
     file_configured: CONFIG.FILE_ID !== "file_your_file_id_here",
     assistant_ready: !!assistant,
     environment_variables: {
       openai_api_key: !!process.env.OPENAI_API_KEY,
-      vector_store_id: !!process.env.VECTOR_STORE_ID,
-      file_id: !!process.env.FILE_ID,
-      upload_method: !!process.env.UPLOAD_METHOD
-    }
+      file_id_env: !!process.env.FILE_ID
+    },
+    instructions: CONFIG.FILE_ID === "file_your_file_id_here" ? 
+      "Set FILE_ID environment variable or update CONFIG.FILE_ID in code" : 
+      "Configuration looks good!"
   });
 });
 
 // Root endpoint
 app.get("/", (req, res) => {
   res.json({
-    message: "Zivy Backend with Manual Upload Setup",
+    message: "Zivy Backend - File Storage Method",
     status: "healthy",
     assistant_ready: !!assistant,
-    instructions: "Configure VECTOR_STORE_ID or FILE_ID in environment variables"
+    file_id: CONFIG.FILE_ID,
+    documentation: {
+      health: "/health - Check system status",
+      stats: "/stats - Performance metrics", 
+      config: "/config - Configuration details"
+    }
   });
 });
 
 // Start server
 async function startServer() {
   try {
-    console.log("🚀 Starting Zivy backend with manual upload setup...");
+    console.log("🚀 Starting Zivy backend with File Storage method...");
     
-    // Check environment variables
+    // Validate OpenAI API key
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY environment variable is required");
     }
     
     console.log("✅ OpenAI API key found");
+    console.log("📄 Using File ID:", CONFIG.FILE_ID);
     
-    // Validate configuration
-    if (CONFIG.METHOD === "vector_store" && CONFIG.VECTOR_STORE_ID === "vs_your_vector_store_id_here") {
-      console.log("⚠️ VECTOR_STORE_ID not configured - please set it in environment variables");
-    }
-    
-    if (CONFIG.METHOD === "file" && CONFIG.FILE_ID === "file_your_file_id_here") {
-      console.log("⚠️ FILE_ID not configured - please set it in environment variables");
-    }
-    
-    // Start server first
+    // Start server
     app.listen(port, () => {
       console.log(`✅ Server running on port ${port}`);
       console.log(`📊 Health: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/health`);
@@ -334,7 +319,7 @@ async function startServer() {
     // Initialize assistant in background
     initializeAssistant().catch(error => {
       console.error("⚠️ Assistant initialization failed:", error.message);
-      console.log("💡 Server is running, but you need to configure Vector Store ID or File ID");
+      console.log("💡 Server running, but assistant needs valid FILE_ID");
     });
     
   } catch (error) {
@@ -352,6 +337,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// Error handlers
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error.message);
   process.exit(1);
