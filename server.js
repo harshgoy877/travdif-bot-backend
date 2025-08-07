@@ -65,7 +65,7 @@ async function initializeGemini() {
     // Load knowledge base from file
     const knowledgePath = path.join(__dirname, "travdif_knowledge.txt");
     
-    if (fs.existsSync(knowledgePath)) {
+    if (fs.existsExists(knowledgePath)) {
       knowledgeBase = fs.readFileSync(knowledgePath, "utf-8");
       console.log(`✅ Knowledge base loaded: ${knowledgeBase.length} characters`);
       console.log("📄 Knowledge preview:", knowledgeBase.substring(0, 100) + "...");
@@ -96,10 +96,24 @@ async function initializeGemini() {
   }
 }
 
-// Smart response generator with knowledge base
+// Enhanced response generator with smart routing
 async function generateResponse(userQuery) {
   try {
-    const systemPrompt = `You are Zivy, an advanced AI assistant for Travdif travel services.
+    // Check if question is travel/Travdif related
+    const travelKeywords = [
+      'travdif', 'travel', 'trip', 'vacation', 'holiday', 'booking', 'package', 
+      'destination', 'flight', 'hotel', 'tour', 'journey', 'itinerary', 'price', 
+      'cost', 'quote', 'contact', 'whatsapp', 'instagram', 'service'
+    ];
+    
+    const queryLower = userQuery.toLowerCase();
+    const isTravelRelated = travelKeywords.some(keyword => queryLower.includes(keyword));
+    
+    let systemPrompt;
+    
+    if (isTravelRelated) {
+      // Travel-related: Use Travdif knowledge base first
+      systemPrompt = `You are Zivy, an advanced AI assistant for Travdif travel services.
 
 RESPONSE STYLE:
 - Keep responses under 40 words when possible
@@ -117,15 +131,42 @@ FORMATTING RULES:
 - Break long text into digestible chunks
 - Include relevant emojis for visual appeal
 
-KNOWLEDGE BASE:
+TRAVDIF KNOWLEDGE BASE:
 ${knowledgeBase}
 
-Answer the user's question about Travdif travel services using the knowledge base above. Be accurate and engaging.
+INSTRUCTIONS:
+1. First, check if the question can be answered using the Travdif knowledge base above
+2. If it's about Travdif services, pricing, contact, or travel packages - use the knowledge base
+3. If it's general travel advice, use your broader knowledge but mention Travdif when relevant
+4. Always be helpful and engaging
 
 User Question: ${userQuery}
 
 Your Response:`;
+    } else {
+      // General question: Answer broadly but introduce yourself as Zivy from Travdif
+      systemPrompt = `You are Zivy, an AI assistant. While I specialize in helping with Travdif travel services, I'm happy to help with any question you have!
 
+RESPONSE STYLE:
+- Keep responses under 40 words when possible
+- For longer responses, use engaging formats:
+  • Bullet points with emojis (✨, 💰, 📱, 🔧, 🎯)
+  • Short, scannable paragraphs
+  • Use conversational, friendly tone
+- Always be helpful and professional
+
+INSTRUCTIONS:
+1. Answer the user's question using your general knowledge
+2. Be accurate and helpful
+3. If the topic could relate to travel, briefly mention that I also help with Travdif travel services
+4. Use emojis and friendly tone
+
+User Question: ${userQuery}
+
+Your Response:`;
+    }
+
+    console.log(`🤖 Processing ${isTravelRelated ? 'TRAVEL-RELATED' : 'GENERAL'} query...`);
     console.log("🤖 Sending request to Gemini...");
     
     const result = await model.generateContent(systemPrompt);
@@ -135,11 +176,11 @@ Your Response:`;
     // Estimate cost (Gemini pricing - very cheap!)
     const estimatedInputTokens = systemPrompt.length / 4;
     const estimatedOutputTokens = reply.length / 4;
-    // Gemini 1.5 Flash: $0.075 input, $0.30 output per 1M tokens
+    // Gemini 2.0 Flash: Similar pricing to 1.5 Flash
     const estimatedCost = (estimatedInputTokens * 0.075 + estimatedOutputTokens * 0.30) / 1000000;
     totalCost += estimatedCost;
     
-    console.log(`✅ Gemini response generated | Cost: ~$${estimatedCost.toFixed(6)}`);
+    console.log(`✅ Gemini response generated | Type: ${isTravelRelated ? 'Travel' : 'General'} | Cost: ~$${estimatedCost.toFixed(6)}`);
     console.log(`📝 Response preview: "${reply.substring(0, 50)}..."`);
     
     return reply;
@@ -189,7 +230,7 @@ app.post("/chat", async (req, res) => {
       await initializeGemini();
     }
 
-    // Generate response with Gemini
+    // Generate response with smart routing
     const reply = await generateResponse(userQuery);
     
     res.json({ reply });
@@ -214,12 +255,13 @@ app.post("/chat", async (req, res) => {
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
   
   res.json({
     status: "healthy",
     service: "Google Gemini",
     model: modelName,
+    mode: "Smart Routing (Travdif + General Knowledge)",
     knowledge_loaded: knowledgeBase.length > 0,
     knowledge_size: `${knowledgeBase.length} characters`,
     stats: {
@@ -233,11 +275,12 @@ app.get("/health", (req, res) => {
 
 // Performance stats endpoint
 app.get("/stats", (req, res) => {
-  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
   
   res.json({
     service: "Google Gemini AI",
     model: modelName,
+    mode: "Smart Routing System",
     performance: {
       total_requests: totalRequests,
       service_uptime: Math.floor(process.uptime()),
@@ -254,36 +297,46 @@ app.get("/stats", (req, res) => {
       size_kb: Math.round(knowledgeBase.length / 1024),
       last_updated: "On server restart"
     },
+    routing_system: {
+      travel_keywords: ["travdif", "travel", "trip", "vacation", "holiday", "booking", "package", "destination", "flight", "hotel", "tour", "journey", "itinerary", "price", "cost", "quote", "contact", "whatsapp", "instagram", "service"],
+      logic: "Travel-related questions use Travdif knowledge base, general questions use broader AI knowledge"
+    },
     available_models: [
-      "gemini-1.5-flash-latest (default - fastest, cheapest)",
+      "gemini-1.5-flash-latest (fastest, cheapest)",
       "gemini-1.5-pro-latest (more powerful)",
-      "gemini-2.0-flash-exp (experimental Gemini 2.0)"
+      "gemini-2.0-flash-exp (latest Gemini 2.0)"
     ],
     benefits: [
+      "Answers ANY question (not just travel)",
+      "Prioritizes Travdif knowledge for travel queries",
       "95% cheaper than OpenAI",
       "Faster response times",
-      "Knowledge base included in context",
-      "No external file dependencies",
-      "Simple and reliable"
+      "Smart question routing",
+      "No external file dependencies"
     ]
   });
 });
 
 // Test endpoint
 app.get("/test", (req, res) => {
-  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
   
   res.json({
-    message: "🚀 Zivy with Google Gemini is working!",
+    message: "🚀 Zivy with Smart Routing - Ready for ANY question!",
     timestamp: new Date().toISOString(),
     service: `Google Gemini (${modelName})`,
+    mode: "Smart Routing: Travdif Knowledge + General AI",
     environment: {
       gemini_api_ready: !!genAI && !!model,
       knowledge_base_loaded: knowledgeBase.length > 0,
       model_configured: modelName,
       port: port
     },
-    quick_test: "Send any message in chat to verify AI responses"
+    test_examples: {
+      travel_question: "Ask about Travdif services, travel packages, or destinations",
+      general_question: "Ask about anything - cooking, technology, history, science, etc.",
+      routing: "Travel questions use Travdif knowledge, others use general AI knowledge"
+    }
   });
 });
 
@@ -294,7 +347,7 @@ app.post("/admin/switch-model", async (req, res) => {
     const validModels = [
       "gemini-1.5-flash-latest",
       "gemini-1.5-pro-latest", 
-      "gemini-2.0-flash"
+      "gemini-2.0-flash-exp"
     ];
     
     if (!validModels.includes(newModel)) {
@@ -311,7 +364,7 @@ app.post("/admin/switch-model", async (req, res) => {
     res.json({
       success: true,
       message: `Switched to ${newModel}`,
-      previous_model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      previous_model: process.env.GEMINI_MODEL || "gemini-2.0-flash-exp",
       new_model: newModel
     });
     
@@ -325,18 +378,25 @@ app.post("/admin/switch-model", async (req, res) => {
 
 // Root endpoint
 app.get("/", (req, res) => {
-  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
   
   res.json({
-    message: "🎉 Zivy Backend - Powered by Google Gemini!",
+    message: "🎉 Zivy Backend - Smart AI Assistant!",
     service: `Google Gemini (${modelName})`,
+    mode: "Smart Routing: Travdif Knowledge + General AI",
     status: "ready",
     cost: "95% cheaper than OpenAI",
+    capabilities: [
+      "✅ Travdif travel services (priority)",
+      "✅ General knowledge questions",
+      "✅ Smart question routing",
+      "✅ Cost-effective responses"
+    ],
     endpoints: {
-      chat: "POST /chat - Main chat endpoint",
+      chat: "POST /chat - Main chat endpoint (handles ANY question)",
       health: "GET /health - System health check",
       stats: "GET /stats - Performance analytics",
-      test: "GET /test - Service test",
+      test: "GET /test - Service test with examples",
       switch_model: "POST /admin/switch-model - Change AI model"
     }
   });
@@ -345,18 +405,19 @@ app.get("/", (req, res) => {
 // Start server
 async function startServer() {
   try {
-    console.log("🚀 Starting Zivy backend with Google Gemini...");
+    console.log("🚀 Starting Zivy backend with Smart Routing...");
     
     // Start server first
     app.listen(port, () => {
-      const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+      const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
       
       console.log("🎉 ================================");
-      console.log("🎉 Zivy Backend - Google Gemini");
+      console.log("🎉 Zivy Backend - Smart AI Assistant");
       console.log("🎉 ================================");
       console.log(`✅ Server running on port ${port}`);
       console.log(`🌐 URL: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}`);
       console.log(`🤖 Model: ${modelName}`);
+      console.log(`🧠 Mode: Smart Routing (Travdif + General Knowledge)`);
       console.log(`💰 Cost: 95% cheaper than OpenAI`);
       console.log(`🔍 Test: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/test`);
       console.log(`💚 Health: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/health`);
