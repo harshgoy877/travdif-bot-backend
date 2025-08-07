@@ -48,11 +48,19 @@ async function initializeGemini() {
       throw new Error("GEMINI_API_KEY environment variable is required");
     }
     
-    // Initialize Gemini
+    // Initialize Gemini with correct model name
     genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
-    console.log("✅ Gemini API initialized successfully!");
+    // Correct Gemini model names (these are the actual API names)
+    const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp"; 
+    // Available models:
+    // - "gemini-1.5-flash-latest" (fastest, cheapest)
+    // - "gemini-1.5-pro-latest" (more powerful)
+    // - "gemini-2.0-flash-exp" (experimental Gemini 2.0)
+    
+    model = genAI.getGenerativeModel({ model: modelName });
+    
+    console.log(`✅ Gemini API initialized with model: ${modelName}`);
     
     // Load knowledge base from file
     const knowledgePath = path.join(__dirname, "travdif_knowledge.txt");
@@ -75,6 +83,8 @@ async function initializeGemini() {
       - WhatsApp: Available 24/7
       - Instagram: @travdif
       - Website: https://travdif.com
+      
+      We specialize in creating unforgettable travel experiences with complete transparency in pricing and personalized attention to every detail of your journey.
       `;
     }
     
@@ -122,9 +132,10 @@ Your Response:`;
     const response = await result.response;
     const reply = response.text();
     
-    // Estimate cost (Gemini 1.5 Flash pricing)
+    // Estimate cost (Gemini pricing - very cheap!)
     const estimatedInputTokens = systemPrompt.length / 4;
     const estimatedOutputTokens = reply.length / 4;
+    // Gemini 1.5 Flash: $0.075 input, $0.30 output per 1M tokens
     const estimatedCost = (estimatedInputTokens * 0.075 + estimatedOutputTokens * 0.30) / 1000000;
     totalCost += estimatedCost;
     
@@ -134,7 +145,17 @@ Your Response:`;
     return reply;
     
   } catch (error) {
-    console.error("❌ Gemini API error:", error.message);
+    console.error("❌ Gemini API error:", error);
+    
+    // Better error handling
+    if (error.message.includes('API_KEY')) {
+      throw new Error("Invalid Gemini API key");
+    } else if (error.message.includes('quota')) {
+      throw new Error("Gemini API quota exceeded");
+    } else if (error.message.includes('model')) {
+      throw new Error("Gemini model not available");
+    }
+    
     throw error;
   }
 }
@@ -162,6 +183,12 @@ app.post("/chat", async (req, res) => {
     const userQuery = userMessage.content;
     console.log(`📝 Processing query: "${userQuery.substring(0, 50)}..."`);
 
+    // Check if Gemini is initialized
+    if (!model) {
+      console.log("⚠️ Gemini not ready, initializing...");
+      await initializeGemini();
+    }
+
     // Generate response with Gemini
     const reply = await generateResponse(userQuery);
     
@@ -170,13 +197,15 @@ app.post("/chat", async (req, res) => {
   } catch (error) {
     console.error("❌ Chat error:", error.message);
     
-    // Fallback responses
+    // Intelligent fallback responses
     let fallbackReply = "Sorry, I'm having trouble right now. Please try again! 🔧";
     
-    if (error.message.includes("API_KEY")) {
+    if (error.message.includes("API key")) {
       fallbackReply = "Configuration issue. Please contact support! 🔧";
     } else if (error.message.includes("quota")) {
-      fallbackReply = "Service temporarily unavailable. Please try again shortly! ⏳";
+      fallbackReply = "Service temporarily busy. Please try again in a moment! ⏳";
+    } else if (error.message.includes("model")) {
+      fallbackReply = "AI service updating. Please try again shortly! 🔄";
     }
     
     res.status(500).json({ reply: fallbackReply });
@@ -185,10 +214,12 @@ app.post("/chat", async (req, res) => {
 
 // Health check endpoint
 app.get("/health", (req, res) => {
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  
   res.json({
     status: "healthy",
     service: "Google Gemini",
-    model: "gemini-1.5-flash",
+    model: modelName,
     knowledge_loaded: knowledgeBase.length > 0,
     knowledge_size: `${knowledgeBase.length} characters`,
     stats: {
@@ -196,24 +227,26 @@ app.get("/health", (req, res) => {
       estimated_total_cost: `$${totalCost.toFixed(4)}`,
       avg_cost_per_request: totalRequests > 0 ? `$${(totalCost / totalRequests).toFixed(6)}` : "$0.000000"
     },
-    api_ready: !!genAI
+    api_ready: !!genAI && !!model
   });
 });
 
 // Performance stats endpoint
 app.get("/stats", (req, res) => {
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  
   res.json({
     service: "Google Gemini AI",
-    model: "gemini-1.5-flash",
+    model: modelName,
     performance: {
       total_requests: totalRequests,
-      service_uptime: process.uptime(),
+      service_uptime: Math.floor(process.uptime()),
       avg_response_cost: totalRequests > 0 ? `$${(totalCost / totalRequests).toFixed(6)}` : "$0.000000"
     },
     cost_analysis: {
       estimated_total_cost: `$${totalCost.toFixed(4)}`,
       monthly_projection_1000_req: `$${(totalCost / Math.max(totalRequests, 1) * 1000).toFixed(2)}`,
-      savings_vs_openai: "~95% cheaper than OpenAI GPT-4o"
+      savings_vs_openai: "~95% cheaper than OpenAI GPT-4"
     },
     knowledge_base: {
       loaded: knowledgeBase.length > 0,
@@ -221,6 +254,11 @@ app.get("/stats", (req, res) => {
       size_kb: Math.round(knowledgeBase.length / 1024),
       last_updated: "On server restart"
     },
+    available_models: [
+      "gemini-1.5-flash-latest (default - fastest, cheapest)",
+      "gemini-1.5-pro-latest (more powerful)",
+      "gemini-2.0-flash-exp (experimental Gemini 2.0)"
+    ],
     benefits: [
       "95% cheaper than OpenAI",
       "Faster response times",
@@ -233,31 +271,73 @@ app.get("/stats", (req, res) => {
 
 // Test endpoint
 app.get("/test", (req, res) => {
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  
   res.json({
     message: "🚀 Zivy with Google Gemini is working!",
     timestamp: new Date().toISOString(),
-    service: "Google Gemini 1.5 Flash",
+    service: `Google Gemini (${modelName})`,
     environment: {
-      gemini_api_ready: !!genAI,
+      gemini_api_ready: !!genAI && !!model,
       knowledge_base_loaded: knowledgeBase.length > 0,
+      model_configured: modelName,
       port: port
     },
-    quick_test: "Send 'test' in chat to verify AI responses"
+    quick_test: "Send any message in chat to verify AI responses"
   });
+});
+
+// Model switching endpoint (for advanced users)
+app.post("/admin/switch-model", async (req, res) => {
+  try {
+    const { model: newModel } = req.body;
+    const validModels = [
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-pro-latest", 
+      "gemini-2.0-flash"
+    ];
+    
+    if (!validModels.includes(newModel)) {
+      return res.status(400).json({
+        error: "Invalid model",
+        valid_models: validModels
+      });
+    }
+    
+    // Re-initialize with new model
+    model = genAI.getGenerativeModel({ model: newModel });
+    console.log(`🔄 Switched to model: ${newModel}`);
+    
+    res.json({
+      success: true,
+      message: `Switched to ${newModel}`,
+      previous_model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      new_model: newModel
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to switch model",
+      message: error.message
+    });
+  }
 });
 
 // Root endpoint
 app.get("/", (req, res) => {
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  
   res.json({
     message: "🎉 Zivy Backend - Powered by Google Gemini!",
-    service: "Google Gemini 1.5 Flash",
+    service: `Google Gemini (${modelName})`,
     status: "ready",
     cost: "95% cheaper than OpenAI",
     endpoints: {
       chat: "POST /chat - Main chat endpoint",
       health: "GET /health - System health check",
       stats: "GET /stats - Performance analytics",
-      test: "GET /test - Service test"
+      test: "GET /test - Service test",
+      switch_model: "POST /admin/switch-model - Change AI model"
     }
   });
 });
@@ -269,12 +349,14 @@ async function startServer() {
     
     // Start server first
     app.listen(port, () => {
+      const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+      
       console.log("🎉 ================================");
       console.log("🎉 Zivy Backend - Google Gemini");
       console.log("🎉 ================================");
       console.log(`✅ Server running on port ${port}`);
       console.log(`🌐 URL: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}`);
-      console.log(`🤖 Service: Google Gemini 1.5 Flash`);
+      console.log(`🤖 Model: ${modelName}`);
       console.log(`💰 Cost: 95% cheaper than OpenAI`);
       console.log(`🔍 Test: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/test`);
       console.log(`💚 Health: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`}/health`);
@@ -298,7 +380,7 @@ process.on('SIGTERM', () => {
   console.log('📊 Final Gemini stats:');
   console.log(`   Total requests: ${totalRequests}`);
   console.log(`   Total cost: $${totalCost.toFixed(4)}`);
-  console.log(`   Savings vs OpenAI: ~${((1 - totalCost/50) * 100).toFixed(1)}%`);
+  console.log(`   Savings vs OpenAI: ~95%`);
   console.log('👋 Shutting down gracefully...');
   process.exit(0);
 });
