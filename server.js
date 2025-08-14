@@ -1,4 +1,4 @@
-// server.js — Zivy Beta (clean, brand-focused)
+// server.js — Zivy Beta (full answers, updated prompt)
 const express = require("express");
 const cors = require("cors");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
@@ -10,7 +10,6 @@ const port = process.env.PORT || 3000;
 
 /* -----------------------------
    CORS: allow ALL origins
-   (ok for beta/testing; tighten later if needed)
 -------------------------------- */
 app.use(cors({
   origin: "*",
@@ -47,7 +46,7 @@ async function initializeGemini() {
     }
 
     genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp"; // keep your default
+    const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
     model = genAI.getGenerativeModel({ model: modelName });
     console.log(`✅ Gemini API initialized with model: ${modelName}`);
 
@@ -65,7 +64,7 @@ ZIVY — BETA KNOWLEDGE (FALLBACK)
 - Install is a single customer-specific script (shared privately after signup).
 - No in-chat human handoff or file upload in beta.
 - Support: ${SUPPORT_EMAIL}
-- Keep answers warm, concise, human. Encourage completing the form on the page.
+- Answer fully and clearly. Do not truncate or say "read more".
       `.trim();
     }
 
@@ -81,25 +80,27 @@ ZIVY — BETA KNOWLEDGE (FALLBACK)
 // =============================
 async function generateResponse(userQuery) {
   try {
-    // System prompt focused on Zivy beta; no site-specifics leaked
+    // *** Full-answer prompt: no teasers, no "read more" ***
     const systemPrompt = `
-You are "Zivy", a friendly, human-like AI support widget for e-commerce stores. 
+You are "Zivy", a friendly, human-like AI support widget for e-commerce stores.
 Context: You are running on the Zivy **beta** signup/demo page. Visitors can try Zivy here while completing a form for a free trial.
+
 Priorities:
-1) Help clearly and conversationally (sound human, concise first).
-2) Encourage finishing the form (Email, Company, Platform, preferences).
-3) Be transparent about beta status and current limits (no in-chat human handoff, no file upload).
-4) Never reveal private embed URLs, tokens, API keys, or internal links.
-5) Do NOT ask for passwords, OTPs, or payment details. Minimize sensitive PII.
+1) Provide the **complete answer directly**. Do **not** truncate or use "read more" or teaser phrasing.
+2) Be clear, organized, and human. Use short paragraphs and bullet points when helpful.
+3) Encourage finishing the form (Email, Company, Platform, preferences) when relevant.
+4) Be transparent about beta status and current limits (no in-chat human handoff, no file upload).
+5) Never reveal private embed URLs, tokens, API keys, or internal links.
+6) Do NOT ask for passwords, OTPs, or payment details. Minimize sensitive PII.
+
 Install guidance:
-- Each customer receives a private, unique script AFTER signup. Use this safe placeholder if asked (do not invent a real URL):
+- Each customer gets a private, unique script AFTER signup. If asked, show this **placeholder only** (do not invent a real URL):
   <script src="{{YOUR_ZIVY_EMBED_URL}}" defer></script>
 - Placement: paste right before </body> so the bubble appears on all pages.
+
 Support: ${SUPPORT_EMAIL}
 
-Tone & style:
-- Warm, concise, confident. Use short paragraphs or bullet points. Light emojis (✨, 💬, 🚀, 🛍️, ⚙️) sparingly.
-- If the question is outside the knowledge below, answer from general knowledge. If information is uncertain or varies by region, say so briefly.
+If the question is outside the knowledge below, answer from your general knowledge. If information is uncertain or varies by region, say so briefly and proceed with best-practice guidance.
 
 KNOWLEDGE:
 ${knowledgeBase}
@@ -107,7 +108,7 @@ ${knowledgeBase}
 User question:
 ${userQuery}
 
-Your answer (human-like, concise first, never reveal private embed URLs):
+Your answer (complete, human-like, no truncation language):
 `.trim();
 
     const result = await model.generateContent(systemPrompt);
