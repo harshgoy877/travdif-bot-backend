@@ -25,7 +25,7 @@ app.use(express.json());
 // ZIVY SETTINGS
 // =============================
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "info@zivy.live";
-const KNOWLEDGE_FILE = process.env.KNOWLEDGE_FILE || "travdif_knowledge.txt";
+const KNOWLEDGE_FILE = process.env.KNOWLEDGE_FILE || "zivy_beta_knowledge.txt";
 
 // Initialize Google Gemini
 let genAI;
