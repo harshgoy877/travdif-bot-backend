@@ -7,27 +7,17 @@ const path = require("path");
 const app = express();
 const port = process.env.PORT || 3000;
 
-const allowedOrigins = [
-  "https://travdif.com",
-  "https://www.travdif.com",
-  "https://incomparable-heliotrope-f687a0.netlify.app",
-  "http://localhost:3000"
-];
-
-// CORS configuration
+/* -----------------------------
+   CORS: allow ALL origins
+   (good for testing/demo; tighten later if needed)
+-------------------------------- */
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('CORS policy does not allow access from this origin'), false);
-    }
-    return callback(null, true);
-  },
+  origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
-
 app.options("*", cors());
+
 app.use(express.json());
 
 // Initialize Google Gemini
@@ -65,7 +55,8 @@ async function initializeGemini() {
     // Load knowledge base from file
     const knowledgePath = path.join(__dirname, "travdif_knowledge.txt");
     
-    if (fs.existsExists(knowledgePath)) {
+    // ✅ fixed: existsSync (was existsExists)
+    if (fs.existsSync(knowledgePath)) {
       knowledgeBase = fs.readFileSync(knowledgePath, "utf-8");
       console.log(`✅ Knowledge base loaded: ${knowledgeBase.length} characters`);
       console.log("📄 Knowledge preview:", knowledgeBase.substring(0, 100) + "...");
@@ -173,11 +164,11 @@ Your Response:`;
     const response = await result.response;
     const reply = response.text();
     
-    // Estimate cost (Gemini pricing - very cheap!)
+    // Estimate cost (very rough)
     const estimatedInputTokens = systemPrompt.length / 4;
     const estimatedOutputTokens = reply.length / 4;
-    // Gemini 2.0 Flash: Similar pricing to 1.5 Flash
-    const estimatedCost = (estimatedInputTokens * 0.075 + estimatedOutputTokens * 0.30) / 1000000;
+    // Gemini 2.0 Flash: similar pricing to 1.5 Flash
+    const estimatedCost = (estimatedInputTokens * 0.075 + estimatedOutputTokens * 0.30) / 1_000_000;
     totalCost += estimatedCost;
     
     console.log(`✅ Gemini response generated | Type: ${isTravelRelated ? 'Travel' : 'General'} | Cost: ~$${estimatedCost.toFixed(6)}`);
